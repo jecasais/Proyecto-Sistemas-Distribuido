@@ -8,6 +8,26 @@ SECTORES = {
     "SO": (2, 0), "S": (2, 1), "SE": (2, 2)
 }
 
+ANILLO_PERIMETRAL = ["NO", "N", "NE", "E", "SE", "S", "SO", "O"]
+
+VECINOS_ADYACENTES = {
+    sector: (
+        ANILLO_PERIMETRAL[(i - 1) % len(ANILLO_PERIMETRAL)],
+        ANILLO_PERIMETRAL[(i + 1) % len(ANILLO_PERIMETRAL)]
+    )
+    for i, sector in enumerate(ANILLO_PERIMETRAL)
+}
+
+SEMILL_COMPARTIDA = 202608
+DURACION_CICLO = 5.0
+
+TIPO_REGISTRO = "REGISTRO"
+TIPO_HEARTBEAT = "HEARTBEAT"
+TIPO_DETECCION = "DETECCION"
+TIPO_RESPUESTA = "RESPUESTA"
+TIPO_RECONFIGURACION = "RECONFIGURACION"
+TIPO_CUARENTENA = "CUARENTENA"
+
 def crear_mensaje(tipo, origen, datos_extra=None):
     """Arma el paquete de datos en formato JSON para enviarlo por la red"""
     paquete = {
@@ -18,3 +38,39 @@ def crear_mensaje(tipo, origen, datos_extra=None):
     }
     # Lo convierte a texto y le agrega un salto de linea al final
     return (json.dumps(paquete) + "\n").encode('utf-8')
+
+def validar_mensaje(mensaje):
+    '''
+    Verifica la integridad estructural y semnatica de un mensaje entrante.
+    Retorna (es_valido: bool, motivom str) para detectar anomalias o ataques.
+    '''
+    if not isinstance(mensaje, dict):
+        return False, "El mensaje no es un diccionario"
+    
+    tipo = mensaje.get("tipo")
+    origen = mensaje.get("origen")
+    datos = mensaje.get("datos", {})
+    
+    tipos_validos = {
+        TIPO_REGISTRO, TIPO_HEARTBEAT, TIPO_DETECCION,
+        TIPO_RESPUESTA, TIPO_RECONFIGURACION, TIPO_CUARENTENA
+    }
+    if tipo not in tipos_validos:
+        return False, f"Tipo de mensaje invalido: {tipo}"
+    
+    if origen != "Nave" and origen not in SECTORES:
+        return False, f"Origen invalido: {origen}"
+    
+    if not isinstance(datos, dict):
+        return False, "Campo 'datos' corrupto"
+    
+    if tipo == TIPO_DETECCION:
+        valor = datos.get("valor")
+        if valor not in (0, 1):
+            return False, f"Lectura anomala fuera de rango binario: valor={valor}"
+        
+        sector_obj = datos.get("sector_obejtivo", origen)
+        if sector_obj not in SECTORES:
+            return False, f"Sector de deteccion invalido: {sector_obj}"
+        
+    return True, "OK"
