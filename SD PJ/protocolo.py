@@ -1,3 +1,11 @@
+"""Protocolo de comunicación del sistema Aegis-Star 8-Sector.
+
+Define el mapeo de los 8 sectores perimetrales sobre la matriz 3x3, la
+topología circular (cada sector tiene dos vecinos), la semilla compartida
+del PRNG determinista, la serialización JSON delimitada por ``\\n`` y la
+validación de integridad de los paquetes enviados por TCP.
+"""
+
 import json
 import time
 
@@ -17,8 +25,7 @@ VECINOS_ADYACENTES = {
     for i, sector in enumerate(ANILLO_PERIMETRAL)
 }
 
-SEMILL_COMPARTIDA = 202608
-SEMILLA_COMPARTIDA = SEMILL_COMPARTIDA
+SEMILLA_COMPARTIDA = 202608
 DURACION_CICLO = 5.0
 
 TIPO_REGISTRO = "REGISTRO"
@@ -29,6 +36,7 @@ TIPO_RECONFIGURACION = "RECONFIGURACION"
 TIPO_CUARENTENA = "CUARENTENA"
 
 def crear_mensaje(tipo, origen, datos_extra=None):
+    """Serializa un paquete JSON con salto de línea como delimitador."""
     paquete = {
         "tipo": tipo,
         "origen": origen,
@@ -38,6 +46,7 @@ def crear_mensaje(tipo, origen, datos_extra=None):
     return (json.dumps(paquete) + "\n").encode('utf-8')
 
 def validar_mensaje(mensaje):
+    """Verifica tipos, origenes y rango binario de una detección."""
     if not isinstance(mensaje, dict):
         return False, "El mensaje no es un diccionario"
     
@@ -63,7 +72,7 @@ def validar_mensaje(mensaje):
         if valor not in (0, 1):
             return False, f"Lectura anomala fuera de rango binario: valor={valor}"
         
-        sector_obj = datos.get("sector_objetivo", datos.get("sector_obejtivo", origen))
+        sector_obj = datos.get("sector_objetivo", origen)
         if sector_obj not in SECTORES:
             return False, f"Sector de deteccion invalido: {sector_obj}"
         

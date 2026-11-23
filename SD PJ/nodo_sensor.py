@@ -1,3 +1,10 @@
+"""Nodo sensor cliente de la red periférica Aegis-Star 8-Sector.
+
+Cada proceso explora su sector con un PRNG determinista alimentado por la
+misma semilla compartida, envía heartbeats y detecciones por TCP y atiende
+las órdenes CUBRIR / LIBERAR / CUARENTENA enviadas por la nave.
+"""
+
 import argparse
 import os
 import socket
@@ -19,7 +26,10 @@ from protocolo import (
 )
 
 class NodoSensor:
+    """Sensor perimetral con escaneo sincronizado y cobertura dinámica."""
+
     def __init__(self, sector, host="127.0.0.1", puerto=5000, semilla=SEMILLA_COMPARTIDA, modo="normal"):
+        """Prepara el socket, la semilla del PRNG y el conjunto de sectores."""
         if sector not in SECTORES:
             raise ValueError(f"Sector invalido. Elige entre: {list(SECTORES.keys())}")
         self.sector = sector
@@ -38,6 +48,7 @@ class NodoSensor:
         self.tiempo_inicio = time.time()
         
     def iniciar(self):
+        """Conecta, se registra y lanza los hilos de heartbeat y escucha."""
         try:
             self.socket_cliente.connect((self.host, self.puerto))
         except ConnectionRefusedError:
@@ -58,6 +69,7 @@ class NodoSensor:
             self.detener()
 
     def enviar_paquete(self, tipo, datos):
+        """Serializa y envía un mensaje protegido por ``lock_envio``."""
         paquete = crear_mensaje(tipo, self.sector, datos)
         try:
             with self.lock_envio:
@@ -67,6 +79,7 @@ class NodoSensor:
             self.activo = False
             
     def bucle_heartbeats(self):
+        """Anuncia cada 1.5s los sectores que este nodo está vigilando."""
         while self.activo:
             try:
                 if not self.en_cuarentena:
@@ -78,6 +91,7 @@ class NodoSensor:
                 break
             
     def escuchar_servidor(self):
+        """Lee las órdenes de la nave delimitadas por salto de línea."""
         buffer_texto = ""
         while self.activo:
             try:
@@ -98,6 +112,7 @@ class NodoSensor:
                 break
             
     def procesar_orden_servidor(self, mensaje):
+        """Aplica CUBRIR, LIBERAR o CUARENTENA según el mensaje recibido."""
         tipo = mensaje.get("tipo")
         datos = mensaje.get("datos", {})
         
@@ -118,6 +133,11 @@ class NodoSensor:
             print(f"[SENSOR {self.sector}] Aislado por la nave. No se enviaran datos hasta nuevo aviso.")
             
     def generar_evento_ciclo(self, ciclo):
+        """Genera de forma determinista las activaciones del ciclo PRNG.
+
+        Todos los nodos usan ``semilla + ciclo``, por lo que los tránsitos
+        tangenciales coinciden sin necesidad de comunicación adicional.
+        """
         rng = random.Random(self.semilla + ciclo)
         tirada = rng.random()
         
@@ -147,6 +167,7 @@ class NodoSensor:
         }
     
     def ejecutar_comportamiento_alien(self):
+        """Simula telemetría hostil para provocar la cuarentena del nodo."""
         rng_alien = random.Random()
         ataque = rng_alien.choice(['VALOR_CORRUPTO', 'RAFAGA_SPAM', 'SECTOR_FALSO'])
         
@@ -168,6 +189,7 @@ class NodoSensor:
                 time.sleep(0.05)
 
     def bucle_escaneo_prng(self):
+        """Escanea por ciclos de 5s respetando los desfases del tránsito."""
         ultimo_ciclo_procesado = -1
 
         while self.activo:
@@ -219,6 +241,7 @@ class NodoSensor:
             time.sleep(0.1)
 
     def detener(self):
+        """Detiene los hilos y cierra el socket del sensor."""
         self.activo = False
         try:
             self.socket_cliente.close()

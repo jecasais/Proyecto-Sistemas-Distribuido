@@ -1,3 +1,41 @@
+import glob
+import os
+import sys
+
+
+def _asegurar_tkinter():
+    """Permite importar Tkinter cuando libtk8.6.so está en Miniconda/Anaconda.
+
+    Este Python no encuentra la librería de Tk en /usr/lib. Si existe en una
+    instalación de Miniconda/Anaconda se relanza el proceso con LD_LIBRARY_PATH
+    apuntando a esa carpeta antes de importar tkinter.
+    """
+    try:
+        import tkinter  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    if os.environ.get("_SD_TK_REEXEC") == "1":
+        return
+
+    directorios = (
+        glob.glob(os.path.expanduser("~/miniconda*/lib"))
+        + glob.glob(os.path.expanduser("~/anaconda*/lib"))
+        + ["/usr/lib/x86_64-linux-gnu", "/usr/lib"]
+    )
+    for directorio in directorios:
+        if os.path.isfile(os.path.join(directorio, "libtk8.6.so")):
+            entorno = os.environ.copy()
+            entorno["LD_LIBRARY_PATH"] = (
+                directorio + os.pathsep + entorno.get("LD_LIBRARY_PATH", "")
+            )
+            entorno["_SD_TK_REEXEC"] = "1"
+            os.execve(sys.executable, [sys.executable] + sys.argv, entorno)
+
+
+_asegurar_tkinter()
+
 import tkinter as tk
 import threading
 from queue import Empty
@@ -27,7 +65,10 @@ MAPA_ESTADOS_SENSOR = {
 
 
 class InterfazNave:
+    """Panel Tkinter desacoplado del servidor mediante ``cola_eventos``."""
+
     def __init__(self, ventana, servidor):
+        """Construye banner, rejilla, panel de 8 sensores y terminal de log."""
         self.ventana = ventana
         self.servidor = servidor
 
@@ -128,13 +169,13 @@ class InterfazNave:
                 panel_sensores,
                 text=f"{sector}: {texto}",
                 font=("Helvetica", 8, "bold"),
-                width=13,
+                width=23,
                 pady=4,
                 bg=color,
                 fg="white",
             )
             etiqueta.grid(
-                row=indice // 4, column=indice % 4, padx=3, pady=3
+                row=indice // 2, column=indice % 2, padx=3, pady=3
             )
             self.etiquetas_sensores[sector] = etiqueta
 
@@ -165,12 +206,14 @@ class InterfazNave:
         self.ventana.after(100, self.actualizar_pantalla)
 
     def _escribir_log(self, texto):
+        """Añade una línea al terminal de telemetría sin bloquear la UI."""
         self.txt_log.config(state="normal")
         self.txt_log.insert(tk.END, f"> {texto}\n")
         self.txt_log.see(tk.END)
         self.txt_log.config(state="disabled")
 
     def actualizar_pantalla(self):
+        """Drena la cola de eventos cada 100 ms y repinta los 8 indicadores."""
         while True:
             try:
                 evento = self.servidor.cola_eventos.get_nowait()
@@ -201,7 +244,7 @@ class InterfazNave:
             alerta = evento.get("alerta", "SIN AMENAZAS")
             if "ROJA" in alerta:
                 color = COLOR_ROJO
-            elif "TRANSITO" in alerta:
+            elif "TRANSITO" in alerta or "CORREL" in alerta:
                 color = COLOR_NARANJA
             else:
                 color = COLOR_VERDE
@@ -210,27 +253,47 @@ class InterfazNave:
             for sector, estado in evento.get("sensores", {}).items():
                 if sector not in self.etiquetas_sensores:
                     continue
-                color_estado, texto_estado = MAPA_ESTADOS_SENSOR.get(
-                    str(estado).lower(), MAPA_ESTADOS_SENSOR["caido"]
+                # El servidor envía "cubriendo (E, SE)" cuando un nodo
+                # respalda varios sectores; mostramos ese detalle en la etiqueta.
+                texto_estado = str(estado)
+                clave = texto_estado.split(" (")[0].lower()
+                color_estado, etiqueta_base = MAPA_ESTADOS_SENSOR.get(
+                    clave, MAPA_ESTADOS_SENSOR["caido"]
+                )
+                detalle = (
+                    texto_estado[len(clave):]
+                    if texto_estado.lower().startswith(clave)
+                    else ""
                 )
                 self.etiquetas_sensores[sector].config(
-                    text=f"{sector}: {texto_estado}", bg=color_estado
+                    text=f"{sector}: {etiqueta_base}{detalle}", bg=color_estado
                 )
 
         self.ventana.after(100, self.actualizar_pantalla)
 
 
 def al_cerrar():
+    """Detiene el servidor y cierra la ventana sin dejar hilos colgados."""
     servidor.en_ejecucion = False
     ventana_principal.destroy()
 
 
 if __name__ == "__main__":
-    servidor = ServidorNave()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Centro de Mando Aegis-Star 8-Sector")
+    parser.add_argument("--host", default="127.0.0.1", help="IP de escucha del servidor")
+    parser.add_argument("--puerto", type=int, default=5000, help="Puerto del servidor")
+    args = parser.parse_args()
+
+    servidor = ServidorNave(host=args.host, puerto=args.puerto)
     hilo_servidor = threading.Thread(target=servidor.iniciar, daemon=True)
     hilo_servidor.start()
 
     ventana_principal = tk.Tk()
     app = InterfazNave(ventana_principal, servidor)
     ventana_principal.protocol("WM_DELETE_WINDOW", al_cerrar)
-    ventana_principal.mainloop()
+    try:
+        ventana_principal.mainloop()
+    except KeyboardInterrupt:
+        al_cerrar()
