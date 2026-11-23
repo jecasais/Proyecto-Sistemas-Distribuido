@@ -4,7 +4,6 @@ import socket
 import threading
 import time
 import json
-import sys
 import random
 from protocolo import (
     SECTORES,
@@ -30,8 +29,8 @@ class NodoSensor:
         self.modo = modo
         
         self.socket_cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.lock_envio = threading.Lock()  # Para evitar que dos hilos envíen datos al mismo tiempo
-        self.lock_sectores = threading.Lock()  # Para proteger la lista de sectores vecinos
+        self.lock_envio = threading.Lock()
+        self.lock_sectores = threading.Lock()
         
         self.sectores_vigilados = {self.sector}
         self.activo = True
@@ -39,7 +38,6 @@ class NodoSensor:
         self.tiempo_inicio = time.time()
         
     def iniciar(self):
-        '''Conecta con la Nave, arranca hilos auxiliares y ejecuta el escaneo de meteoritos'''
         try:
             self.socket_cliente.connect((self.host, self.puerto))
         except ConnectionRefusedError:
@@ -58,9 +56,17 @@ class NodoSensor:
             print(f'\n[SENSOR {self.sector}] Apagado manual.')
         finally:
             self.detener()
+
+    def enviar_paquete(self, tipo, datos):
+        paquete = crear_mensaje(tipo, self.sector, datos)
+        try:
+            with self.lock_envio:
+                self.socket_cliente.sendall(paquete)
+        except OSError as error:
+            print(f"[SENSOR {self.sector}] Error al enviar datos: {error}")
+            self.activo = False
             
     def bucle_heartbeats(self):
-        '''Envia señales de vida a la nave cada 1.5 segundos'''
         while self.activo:
             try:
                 if not self.en_cuarentena:
@@ -72,7 +78,6 @@ class NodoSensor:
                 break
             
     def escuchar_servidor(self):
-        '''Escucha mensajes de la nave y actua en consecuencia'''
         buffer_texto = ""
         while self.activo:
             try:
@@ -88,12 +93,11 @@ class NodoSensor:
                     if not linea.strip():
                         continue
                     mensaje = json.loads(linea)
-                    self.procesar_orden_mensaje(mensaje)
+                    self.procesar_orden_servidor(mensaje)
             except (OSError, json.JSONDecodeError):
                 break
             
     def procesar_orden_servidor(self, mensaje):
-        '''Ejecuta reconfiguracion dinamica de sectores o acata aislamiento.'''
         tipo = mensaje.get("tipo")
         datos = mensaje.get("datos", {})
         
@@ -113,12 +117,7 @@ class NodoSensor:
             self.en_cuarentena = True
             print(f"[SENSOR {self.sector}] Aislado por la nave. No se enviaran datos hasta nuevo aviso.")
             
-    def generar_evento_ciclo(self,ciclo):
-        '''
-        Usa el PRNG con semilla compartida para que todos los nodos calculen
-        de forma defeinitiva y coordinada la trauectoria del meteorito en este ciclo.
-        Retorna un dict {sector: retraso_segundos} con los sensores que deben disparar
-        '''
+    def generar_evento_ciclo(self, ciclo):
         rng = random.Random(self.semilla + ciclo)
         tirada = rng.random()
         
@@ -148,23 +147,19 @@ class NodoSensor:
         }
     
     def ejecutar_comportamiento_alien(self):
-        '''Simula un nodo comprometido por aliens enviando mensajes corruptos o spam.'''
         rng_alien = random.Random()
         ataque = rng_alien.choice(['VALOR_CORRUPTO', 'RAFAGA_SPAM', 'SECTOR_FALSO'])
         
-        if ataque == 'VALOR_CORRUPTO':
+        if ataque == "VALOR_CORRUPTO":
             print(f"[SENSOR {self.sector} - ALIEN] Enviando valor corrupto a la nave.")
             self.enviar_paquete(TIPO_DETECCION, {'valor': 999, 'sector_objetivo': self.sector})
             
-        elif ataque == 'SECTOR_FALSO':
-            print(f"[SENSOR {self.sector} - ALIEN] Suplantando sector inexistente 'X9'... ")
-            self.enviar_paquete(TIPO_DETECCION, {"valor": 999, "sector_objetivo": self.sector})
-
         elif ataque == "SECTOR_FALSO":
-            print(f"[SENSOR {self.sector} - ALIEN] Suplantando sector inexistente 'X9'...")
-            paquete_falso = {"tipo": TIPO_DETECCION, "origen": "X9", "tiempo": time.time(), "datos": {"valor": 1}}
-            with self.lock_envio:
-                self.socket_cliente.sendall((json.dumps(paquete_falso) + "\n").encode("utf-8"))
+            print(f"[SENSOR {self.sector} - ALIEN] Enviando un sector de detección inexistente.")
+            self.enviar_paquete(
+                TIPO_DETECCION,
+                {"valor": 1, "sector_objetivo": "X9"},
+            )
 
         elif ataque == "RAFAGA_SPAM":
             print(f"[SENSOR {self.sector} - ALIEN] Enviando ráfaga anómala de detecciones...")
@@ -173,18 +168,15 @@ class NodoSensor:
                 time.sleep(0.05)
 
     def bucle_escaneo_prng(self):
-        """Ciclo principal sincronizado por ventanas de tiempo."""
         ultimo_ciclo_procesado = -1
 
         while self.activo:
             ahora = time.time()
 
-            # Simulación de caída repentina (Objective 4: Heartbeat timeout)
             if self.modo == "falla" and (ahora - self.tiempo_inicio) > 10.0:
                 print(f"[SENSOR {self.sector} - FALLA] ¡Fallo crítico de hardware! Desconectando abruptamente.")
                 os._exit(1)
 
-            # Simulación de control alienígena tras 8 segundos de operación normal
             if self.modo == "alien" and (ahora - self.tiempo_inicio) > 8.0 and not self.en_cuarentena:
                 self.ejecutar_comportamiento_alien()
                 time.sleep(3.0)
@@ -198,7 +190,6 @@ class NodoSensor:
                 with self.lock_sectores:
                     mis_sectores = list(self.sectores_vigilados)
 
-                # Verifica si alguno de los sectores vigilados por este nodo fue impactado
                 detecciones_locales = [
                     (sec, activaciones[sec]) for sec in mis_sectores if sec in activaciones
                 ]

@@ -1,7 +1,6 @@
 import json
 import time
 
-# Coordenadas de los 8 sectores alrededor de la nave (Fila, Columna)
 SECTORES = {
     "NO": (0, 0), "N": (0, 1), "NE": (0, 2),
     "O":  (1, 0),             "E":  (1, 2),
@@ -19,6 +18,7 @@ VECINOS_ADYACENTES = {
 }
 
 SEMILL_COMPARTIDA = 202608
+SEMILLA_COMPARTIDA = SEMILL_COMPARTIDA
 DURACION_CICLO = 5.0
 
 TIPO_REGISTRO = "REGISTRO"
@@ -29,21 +29,15 @@ TIPO_RECONFIGURACION = "RECONFIGURACION"
 TIPO_CUARENTENA = "CUARENTENA"
 
 def crear_mensaje(tipo, origen, datos_extra=None):
-    """Arma el paquete de datos en formato JSON para enviarlo por la red"""
     paquete = {
-        "tipo": tipo,          # Puede ser: REGISTRO, HEARTBEAT, DETECCION
-        "origen": origen,      # Nombre del sector (ej: N, NE, S...)
+        "tipo": tipo,
+        "origen": origen,
         "tiempo": time.time(),
         "datos": datos_extra or {}
     }
-    # Lo convierte a texto y le agrega un salto de linea al final
     return (json.dumps(paquete) + "\n").encode('utf-8')
 
 def validar_mensaje(mensaje):
-    '''
-    Verifica la integridad estructural y semnatica de un mensaje entrante.
-    Retorna (es_valido: bool, motivom str) para detectar anomalias o ataques.
-    '''
     if not isinstance(mensaje, dict):
         return False, "El mensaje no es un diccionario"
     
@@ -69,7 +63,7 @@ def validar_mensaje(mensaje):
         if valor not in (0, 1):
             return False, f"Lectura anomala fuera de rango binario: valor={valor}"
         
-        sector_obj = datos.get("sector_obejtivo", origen)
+        sector_obj = datos.get("sector_objetivo", datos.get("sector_obejtivo", origen))
         if sector_obj not in SECTORES:
             return False, f"Sector de deteccion invalido: {sector_obj}"
         
